@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-use crate::rust_tree::display::colorize;
+use crate::rust_tree::display::{colorize, colorize_doc_comment};
 use crate::rust_tree::doc_comments::format_doc_comment_for_path;
 use crate::rust_tree::icons::IconManager;
 // Conditionally import the permissions formatter only on Unix
@@ -213,7 +213,11 @@ fn format_entry_line(
 
     if options.doc {
         if let Some(doc_comment) = format_doc_comment_for_path(&path) {
-            line.push_str(&doc_comment);
+            if options.no_color || !options.color {
+                line.push_str(&doc_comment);
+            } else {
+                line.push_str(&colorize_doc_comment(&doc_comment));
+            }
         }
     }
 

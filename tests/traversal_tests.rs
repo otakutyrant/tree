@@ -1580,6 +1580,28 @@ fn test_doc_allows_bom_and_shebang_before_tsdoc() {
 }
 
 #[test]
+fn test_doc_is_green_when_color_enabled() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("api.ts"),
+        "/** API surface */\nexport const api = true;\n",
+    )
+    .unwrap();
+
+    let mut options = create_default_options();
+    options.doc = true;
+    options.color = true;
+    options.no_report = true;
+
+    let output = list_directory_as_string(dir.path(), &options).unwrap();
+    assert!(output.contains("api.ts"));
+    assert!(
+        output.contains("\u{1b}[32m /** API surface */\u{1b}[0m"),
+        "{output}"
+    );
+}
+
+#[test]
 fn test_filesystem_color_file_types() {
     let temp_dir = tempdir().unwrap();
     let temp_path = temp_dir.path();

@@ -34,6 +34,10 @@ pub fn colorize(entry: &fs::DirEntry, text: &str) -> String {
     }
 }
 
+pub fn colorize_doc_comment(text: &str) -> String {
+    Green.paint(text).to_string()
+}
+
 // --- Permissions Formatting (Unix only) ---
 #[cfg(unix)]
 pub fn format_permissions_unix(mode: u32, is_dir: bool) -> String {
