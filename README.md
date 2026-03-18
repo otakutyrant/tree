@@ -39,6 +39,7 @@ Website: [https://peteretelej.github.io/tree/](https://peteretelej.github.io/tre
 - [x] Omit summary report (`--noreport`)
 - [x] Print permissions (`-p`)
 - [x] Read directory listing from a file or stdin (`--fromfile`)
+- [x] Show leading file/module docs for supported source files (`--doc`)
 
 Please feel to open PR requests in case interested in implementing some of the pending features.
 
@@ -120,6 +121,28 @@ For example:
 
 # Hide directories that have no matching files
 ./tree --pattern="*.txt" --exclude="*.log" --prune .
+
+# Show leading docs for supported source files
+./tree --doc src
+```
+
+`--doc` currently supports:
+
+- TypeScript / TSX file-level TSDoc blocks
+- Python module docstrings, with `__init__.py` representing package directory docs
+- Rust inner module/crate docs (`//!` and `/*! ... */`), with `mod.rs` representing module directory docs
+
+Example from this repository:
+
+```text
+$ ./target/release/tree --doc -L 2 --noreport src
+src
+├── lib.rs //! Public library entry points for the `tree` crate.
+├── main.rs //! Command-line binary entry point for `tree`.
+└── rust_tree //! Core modules for traversal, rendering, and CLI behavior.
+    ├── cli.rs //! Command-line parsing and top-level CLI execution.
+    ├── doc_comments.rs //! Extraction of leading documentation comments for supported languages.
+    └── traversal.rs //! Filesystem and virtual tree traversal plus output rendering.
 ```
 
 ### Using as Rust Crate

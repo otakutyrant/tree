@@ -1,3 +1,5 @@
+//! Filesystem and virtual tree traversal plus output rendering.
+
 use std::fs;
 use std::fs::OpenOptions;
 use std::io;

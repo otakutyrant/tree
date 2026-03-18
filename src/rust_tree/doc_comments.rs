@@ -1,9 +1,11 @@
+//! Extraction of leading documentation comments for supported languages.
+
 use std::fs;
 use std::path::Path;
 
 pub fn format_doc_comment_for_path(path: &Path) -> Option<String> {
     if path.is_dir() {
-        return ["index.ts", "index.tsx", "__init__.py"]
+        return ["index.ts", "index.tsx", "__init__.py", "mod.rs"]
             .iter()
             .map(|name| path.join(name))
             .find_map(|index_path| format_doc_comment_for_file(&index_path));
@@ -24,6 +26,10 @@ fn format_doc_comment_for_file(path: &Path) -> Option<String> {
         "py" => {
             let doc = extract_module_docstring(&contents)?;
             Some(format!(" \"\"\" {doc} \"\"\""))
+        }
+        "rs" => {
+            let doc = extract_rust_module_doc(&contents)?;
+            Some(format!(" //! {doc}"))
         }
         _ => None,
     }
@@ -169,6 +175,72 @@ fn normalize_python_docstring(literal: &str) -> Option<String> {
     }
 }
 
+fn extract_rust_module_doc(contents: &str) -> Option<String> {
+    let contents = contents.strip_prefix('\u{feff}').unwrap_or(contents);
+    let contents = strip_shebang(contents);
+    let contents = contents.trim_start_matches([' ', '\t', '\r', '\n']);
+
+    if contents.starts_with("//!") {
+        return normalize_rust_line_docs(contents);
+    }
+
+    if contents.starts_with("/*!") {
+        return normalize_rust_block_doc(contents);
+    }
+
+    None
+}
+
+fn normalize_rust_line_docs(contents: &str) -> Option<String> {
+    let mut parts = Vec::new();
+
+    for line in contents.lines() {
+        let trimmed = line.trim_start();
+        if let Some(doc_line) = trimmed.strip_prefix("//!") {
+            let doc_line = doc_line.trim();
+            if !doc_line.is_empty() {
+                parts.push(doc_line);
+            }
+            continue;
+        }
+
+        if trimmed.is_empty() {
+            if parts.is_empty() {
+                continue;
+            }
+        }
+        break;
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" "))
+    }
+}
+
+fn normalize_rust_block_doc(contents: &str) -> Option<String> {
+    let end = contents.find("*/")?;
+    let block = &contents[..end + 2];
+    let inner = block
+        .strip_prefix("/*!")?
+        .strip_suffix("*/")?
+        .trim_matches(|c: char| c == '\r' || c == '\n');
+
+    let parts: Vec<&str> = inner
+        .lines()
+        .map(|line| line.trim())
+        .map(|line| line.strip_prefix('*').unwrap_or(line).trim())
+        .filter(|line| !line.is_empty())
+        .collect();
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" "))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,6 +310,36 @@ mod tests {
     fn rejects_non_leading_python_docstring() {
         assert_eq!(
             extract_module_docstring("import os\n\"\"\"Not a module docstring\"\"\"\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn extracts_rust_line_module_docs() {
+        assert_eq!(
+            extract_rust_module_doc(
+                "//! Core tree traversal.\n//! Renders output.\n\npub fn run() {}\n"
+            ),
+            Some("Core tree traversal. Renders output.".to_string())
+        );
+    }
+
+    #[test]
+    fn extracts_rust_block_module_docs() {
+        assert_eq!(
+            extract_rust_module_doc(
+                "/*!\n * Core tree traversal.\n * Renders output.\n */\npub fn run() {}\n"
+            ),
+            Some("Core tree traversal. Renders output.".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_non_leading_rust_docs() {
+        assert_eq!(
+            extract_rust_module_doc(
+                "// regular comment\n//! Not module docs here\npub fn run() {}\n"
+            ),
             None
         );
     }

@@ -1592,6 +1592,47 @@ fn test_doc_shows_package_docstring_for_directory() {
 }
 
 #[test]
+fn test_doc_shows_rust_module_docs_for_file() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("api.rs"),
+        "//! API surface\n//! for tree output.\n\npub fn run() {}\n",
+    )
+    .unwrap();
+
+    let mut options = create_default_options();
+    options.doc = true;
+    options.no_report = true;
+
+    let output = list_directory_as_string(dir.path(), &options).unwrap();
+    assert!(
+        output.contains("api.rs //! API surface for tree output."),
+        "{output}"
+    );
+}
+
+#[test]
+fn test_doc_shows_mod_rs_docs_for_directory() {
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("feature")).unwrap();
+    fs::write(
+        dir.path().join("feature").join("mod.rs"),
+        "//! Feature module\n//! for tree output.\n\npub fn run() {}\n",
+    )
+    .unwrap();
+
+    let mut options = create_default_options();
+    options.doc = true;
+    options.no_report = true;
+
+    let output = list_directory_as_string(dir.path(), &options).unwrap();
+    assert!(
+        output.contains("feature //! Feature module for tree output."),
+        "{output}"
+    );
+}
+
+#[test]
 fn test_doc_ignores_non_leading_tsdoc() {
     let dir = tempdir().unwrap();
     fs::write(
@@ -1623,6 +1664,23 @@ fn test_doc_ignores_non_leading_python_docstring() {
 
     let output = list_directory_as_string(dir.path(), &options).unwrap();
     assert!(!output.contains("\"\"\" API surface \"\"\""), "{output}");
+}
+
+#[test]
+fn test_doc_ignores_non_leading_rust_module_docs() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("api.rs"),
+        "// Regular comment\n//! API surface\npub fn run() {}\n",
+    )
+    .unwrap();
+
+    let mut options = create_default_options();
+    options.doc = true;
+    options.no_report = true;
+
+    let output = list_directory_as_string(dir.path(), &options).unwrap();
+    assert!(!output.contains("//! API surface"), "{output}");
 }
 
 #[test]

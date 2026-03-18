@@ -1,3 +1,5 @@
+//! Core modules for traversal, rendering, and CLI behavior.
+
 pub mod cli;
 pub mod display;
 pub mod doc_comments;

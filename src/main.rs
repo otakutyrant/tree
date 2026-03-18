@@ -1,3 +1,5 @@
+//! Command-line binary entry point for `tree`.
+
 use rust_tree::rust_tree::cli::run_cli;
 use rust_tree::rust_tree::utils::is_broken_pipe_error;
 

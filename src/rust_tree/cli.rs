@@ -1,4 +1,4 @@
-// CLI module - handles cli flag parsing
+//! Command-line parsing and top-level CLI execution.
 
 use clap::Parser;
 use glob::Pattern;
