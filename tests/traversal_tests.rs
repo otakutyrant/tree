@@ -55,6 +55,7 @@ fn create_default_options() -> TreeOptions {
         print_permissions: false,
         from_file: false,
         icons: false,
+        doc: false,
         prune: false,
         match_dirs: false,
         gitignore: false,
@@ -1502,6 +1503,80 @@ fn test_filesystem_icons_enabled() {
     assert!(!output.is_empty());
     assert!(output.contains("src"));
     assert!(output.contains("README.md"));
+}
+
+#[test]
+fn test_doc_shows_tsdoc_for_ts_file() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("api.ts"),
+        "/** API surface */\nexport const api = true;\n",
+    )
+    .unwrap();
+
+    let mut options = create_default_options();
+    options.doc = true;
+    options.no_report = true;
+
+    let output = list_directory_as_string(dir.path(), &options).unwrap();
+    assert!(output.contains("api.ts /** API surface */"), "{output}");
+}
+
+#[test]
+fn test_doc_shows_index_tsdoc_for_directory() {
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("feature")).unwrap();
+    fs::write(
+        dir.path().join("feature").join("index.ts"),
+        "/** Feature module */\nexport * from './impl';\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("feature").join("impl.ts"),
+        "/** Implementation */\nexport const impl_value = 1;\n",
+    )
+    .unwrap();
+
+    let mut options = create_default_options();
+    options.doc = true;
+    options.no_report = true;
+
+    let output = list_directory_as_string(dir.path(), &options).unwrap();
+    assert!(output.contains("feature /** Feature module */"), "{output}");
+}
+
+#[test]
+fn test_doc_ignores_non_leading_tsdoc() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("api.ts"),
+        "// Not a tsdoc header\n/** API surface */\nexport const api = true;\n",
+    )
+    .unwrap();
+
+    let mut options = create_default_options();
+    options.doc = true;
+    options.no_report = true;
+
+    let output = list_directory_as_string(dir.path(), &options).unwrap();
+    assert!(!output.contains("/** API surface */"), "{output}");
+}
+
+#[test]
+fn test_doc_allows_bom_and_shebang_before_tsdoc() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("cli.ts"),
+        "\u{feff}#!/usr/bin/env node\n/** CLI entrypoint */\nconsole.log('hi');\n",
+    )
+    .unwrap();
+
+    let mut options = create_default_options();
+    options.doc = true;
+    options.no_report = true;
+
+    let output = list_directory_as_string(dir.path(), &options).unwrap();
+    assert!(output.contains("cli.ts /** CLI entrypoint */"), "{output}");
 }
 
 #[test]

@@ -30,6 +30,7 @@ fn create_test_options() -> TreeOptions {
         print_permissions: false,
         from_file: false,
         icons: false,
+        doc: false,
         prune: false,
         match_dirs: false,
         gitignore: false,
@@ -63,6 +64,7 @@ fn test_tree_options_construction() {
     assert!(options.no_report);
     assert!(!options.print_permissions);
     assert!(!options.from_file);
+    assert!(!options.doc);
 }
 
 #[test]
@@ -91,6 +93,7 @@ fn test_tree_options_defaults() {
         print_permissions: false,
         from_file: false,
         icons: false,
+        doc: false,
         prune: false,
         match_dirs: false,
         gitignore: false,
@@ -225,6 +228,7 @@ fn test_boolean_option_combinations() {
     options.no_report = true;
     options.print_permissions = true;
     options.from_file = true;
+    options.doc = true;
 
     // All should be set as expected
     assert!(options.all_files);
@@ -244,6 +248,7 @@ fn test_boolean_option_combinations() {
     assert!(options.no_report);
     assert!(options.print_permissions);
     assert!(options.from_file);
+    assert!(options.doc);
 }
 
 fn make_test_dir() -> TempDir {
@@ -266,6 +271,7 @@ fn make_test_dir() -> TempDir {
 #[case::no_indent(&["-i"])]
 #[case::size(&["-s"])]
 #[case::reverse(&["-r"])]
+#[case::doc(&["--doc"])]
 fn test_run_with_args_success(#[case] extra_flags: &[&str]) {
     let dir = make_test_dir();
     let mut args: Vec<String> = vec!["tree".to_string(), dir.path().to_str().unwrap().to_string()];

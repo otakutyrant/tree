@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::os::unix::fs::PermissionsExt;
 
 use crate::rust_tree::display::colorize;
+use crate::rust_tree::doc_comments::format_doc_comment_for_path;
 use crate::rust_tree::icons::IconManager;
 // Conditionally import the permissions formatter only on Unix
 #[cfg(unix)]
@@ -209,6 +210,12 @@ fn format_entry_line(
         colorize(entry, &display_name)
     };
     line.push_str(&colored_name);
+
+    if options.doc {
+        if let Some(doc_comment) = format_doc_comment_for_path(&path) {
+            line.push_str(&doc_comment);
+        }
+    }
 
     // --- Append indicator if -F/--classify is enabled ---
     if options.classify {
@@ -584,6 +591,7 @@ pub fn list_directory<P: AsRef<Path>>(path: P, options: &TreeOptions) -> std::io
 ///     print_permissions: false,
 ///     from_file: false,
 ///     icons: false,
+///     doc: false,
 ///     prune: false,
 ///     gitignore: false,
 /// };

@@ -164,6 +164,12 @@ pub struct Cli {
     pub icons: bool,
 
     #[arg(
+        long = "doc",
+        help = "Show leading file documentation comments for supported source files."
+    )]
+    pub doc: bool,
+
+    #[arg(
         long = "prune",
         help = "Prune directories with no matching files when using -P or -I. Has increased memory usage."
     )]
@@ -228,6 +234,7 @@ pub fn cli_to_options(cli: &Cli) -> Result<TreeOptions, String> {
         print_permissions: cli.print_permissions,
         from_file: cli.fromfile,
         icons: cli.icons,
+        doc: cli.doc,
         prune: cli.prune,
         gitignore: cli.gitignore,
     })
@@ -302,6 +309,7 @@ mod tests {
             print_permissions: false,
             fromfile: false,
             icons: false,
+            doc: false,
             prune: false,
             match_dirs: false,
             gitignore: false,
@@ -342,6 +350,7 @@ mod tests {
             print_permissions: true,
             fromfile: true,
             icons: false,
+            doc: true,
             prune: false,
             match_dirs: false,
             gitignore: false,
@@ -395,6 +404,7 @@ mod tests {
             print_permissions: true,
             fromfile: true,
             icons: false,
+            doc: false,
             prune: false,
             match_dirs: false,
             gitignore: false,
@@ -433,6 +443,7 @@ mod tests {
             print_permissions: false,
             fromfile: false,
             icons: false,
+            doc: false,
             prune: false,
             match_dirs: false,
             gitignore: false,
