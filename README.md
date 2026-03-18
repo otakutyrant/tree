@@ -128,9 +128,19 @@ For example:
 
 `--doc` currently supports:
 
-- TypeScript / TSX file-level TSDoc blocks
-- Python module docstrings, with `__init__.py` representing package directory docs
-- Rust inner module/crate docs (`//!` and `/*! ... */`), with `mod.rs` representing module directory docs
+| Language | Files | Parsed documentation |
+| --- | --- | --- |
+| TypeScript | `*.ts`, `*.tsx` | The first leading TSDoc block (`/** ... */`) |
+| Python | `*.py` | The module docstring |
+| Rust | `*.rs` | The first leading inner doc (`//! ...` or `/*! ... */`) |
+
+Directory docs are inferred from language-specific entry files:
+
+| Language | Directory doc file | Parsed documentation |
+| --- | --- | --- |
+| TypeScript | `index.ts`, `index.tsx` | The first leading TSDoc block |
+| Python | `__init__.py` | The module docstring for the package |
+| Rust | `mod.rs` | The first leading inner doc for the module |
 
 Example from this repository:
 
