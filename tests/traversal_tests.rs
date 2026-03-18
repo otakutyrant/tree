@@ -1546,6 +1546,52 @@ fn test_doc_shows_index_tsdoc_for_directory() {
 }
 
 #[test]
+fn test_doc_shows_python_module_docstring_for_file() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("api.py"),
+        "# Leading comment is allowed\n\n\"\"\"API surface\"\"\"\napi = True\n",
+    )
+    .unwrap();
+
+    let mut options = create_default_options();
+    options.doc = true;
+    options.no_report = true;
+
+    let output = list_directory_as_string(dir.path(), &options).unwrap();
+    assert!(
+        output.contains("api.py \"\"\" API surface \"\"\""),
+        "{output}"
+    );
+}
+
+#[test]
+fn test_doc_shows_package_docstring_for_directory() {
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("feature")).unwrap();
+    fs::write(
+        dir.path().join("feature").join("__init__.py"),
+        "\"\"\"Feature package\"\"\"\nfrom .impl import impl_value\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("feature").join("impl.py"),
+        "\"\"\"Implementation\"\"\"\nimpl_value = 1\n",
+    )
+    .unwrap();
+
+    let mut options = create_default_options();
+    options.doc = true;
+    options.no_report = true;
+
+    let output = list_directory_as_string(dir.path(), &options).unwrap();
+    assert!(
+        output.contains("feature \"\"\" Feature package \"\"\""),
+        "{output}"
+    );
+}
+
+#[test]
 fn test_doc_ignores_non_leading_tsdoc() {
     let dir = tempdir().unwrap();
     fs::write(
@@ -1560,6 +1606,23 @@ fn test_doc_ignores_non_leading_tsdoc() {
 
     let output = list_directory_as_string(dir.path(), &options).unwrap();
     assert!(!output.contains("/** API surface */"), "{output}");
+}
+
+#[test]
+fn test_doc_ignores_non_leading_python_docstring() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("api.py"),
+        "import os\n\"\"\"API surface\"\"\"\napi = True\n",
+    )
+    .unwrap();
+
+    let mut options = create_default_options();
+    options.doc = true;
+    options.no_report = true;
+
+    let output = list_directory_as_string(dir.path(), &options).unwrap();
+    assert!(!output.contains("\"\"\" API surface \"\"\""), "{output}");
 }
 
 #[test]

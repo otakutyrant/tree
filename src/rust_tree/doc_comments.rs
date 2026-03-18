@@ -3,7 +3,7 @@ use std::path::Path;
 
 pub fn format_doc_comment_for_path(path: &Path) -> Option<String> {
     if path.is_dir() {
-        return ["index.ts", "index.tsx"]
+        return ["index.ts", "index.tsx", "__init__.py"]
             .iter()
             .map(|name| path.join(name))
             .find_map(|index_path| format_doc_comment_for_file(&index_path));
@@ -14,13 +14,19 @@ pub fn format_doc_comment_for_path(path: &Path) -> Option<String> {
 
 fn format_doc_comment_for_file(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?;
-    if !matches!(ext, "ts" | "tsx") {
-        return None;
-    }
-
     let contents = fs::read_to_string(path).ok()?;
-    let doc = extract_leading_tsdoc(&contents)?;
-    Some(format!(" /** {doc} */"))
+
+    match ext {
+        "ts" | "tsx" => {
+            let doc = extract_leading_tsdoc(&contents)?;
+            Some(format!(" /** {doc} */"))
+        }
+        "py" => {
+            let doc = extract_module_docstring(&contents)?;
+            Some(format!(" \"\"\" {doc} \"\"\""))
+        }
+        _ => None,
+    }
 }
 
 fn extract_leading_tsdoc(contents: &str) -> Option<String> {
@@ -57,6 +63,102 @@ fn normalize_tsdoc_block(block: &str) -> Option<String> {
         .lines()
         .map(|line| line.trim())
         .map(|line| line.strip_prefix('*').unwrap_or(line).trim())
+        .filter(|line| !line.is_empty())
+        .collect();
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" "))
+    }
+}
+
+fn extract_module_docstring(contents: &str) -> Option<String> {
+    let contents = contents.strip_prefix('\u{feff}').unwrap_or(contents);
+    let contents = strip_shebang(contents);
+    let contents = skip_python_leading_trivia(contents);
+    let (literal, _) = parse_python_string_literal(contents)?;
+    normalize_python_docstring(literal)
+}
+
+fn skip_python_leading_trivia(mut contents: &str) -> &str {
+    loop {
+        let trimmed = contents.trim_start_matches([' ', '\t', '\r', '\n']);
+        if trimmed.len() != contents.len() {
+            contents = trimmed;
+            continue;
+        }
+
+        let line = contents.trim_start_matches([' ', '\t']);
+        if let Some(rest) = line.strip_prefix('#') {
+            if let Some(newline_pos) = rest.find('\n') {
+                contents = &rest[newline_pos + 1..];
+            } else {
+                return "";
+            }
+            continue;
+        }
+
+        return contents;
+    }
+}
+
+fn parse_python_string_literal(contents: &str) -> Option<(&str, &str)> {
+    let bytes = contents.as_bytes();
+    let mut idx = 0;
+
+    while idx < bytes.len() && bytes[idx].is_ascii_alphabetic() {
+        idx += 1;
+    }
+
+    let prefix = &contents[..idx];
+    if prefix.chars().any(|c| matches!(c, 'b' | 'B' | 'f' | 'F')) {
+        return None;
+    }
+
+    let rest = &contents[idx..];
+    let quote = rest.chars().next()?;
+    if !matches!(quote, '\'' | '"') {
+        return None;
+    }
+
+    if rest.starts_with("\"\"\"") || rest.starts_with("'''") {
+        let delimiter = &rest[..3];
+        let body = &rest[3..];
+        let end = body.find(delimiter)?;
+        let literal = &body[..end];
+        let remaining = &body[end + 3..];
+        Some((literal, remaining))
+    } else {
+        let mut escaped = false;
+        for (pos, ch) in rest[1..].char_indices() {
+            if ch == '\n' {
+                return None;
+            }
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if ch == '\\' {
+                escaped = true;
+                continue;
+            }
+            if ch == quote {
+                let end = pos + 2;
+                let literal = &rest[1..end - 1];
+                let remaining = &rest[end..];
+                return Some((literal, remaining));
+            }
+        }
+        None
+    }
+}
+
+fn normalize_python_docstring(literal: &str) -> Option<String> {
+    let parts: Vec<&str> = literal
+        .trim_matches(|c: char| c == '\r' || c == '\n')
+        .lines()
+        .map(|line| line.trim())
         .filter(|line| !line.is_empty())
         .collect();
 
@@ -112,5 +214,31 @@ mod tests {
         let md_path = file.path().with_extension("md");
         fs::copy(file.path(), &md_path).unwrap();
         assert_eq!(format_doc_comment_for_file(&md_path), None);
+    }
+
+    #[test]
+    fn extracts_python_module_docstring() {
+        assert_eq!(
+            extract_module_docstring("\"\"\"Hello world\"\"\"\nvalue = 1\n"),
+            Some("Hello world".to_string())
+        );
+    }
+
+    #[test]
+    fn extracts_python_module_docstring_after_comments() {
+        assert_eq!(
+            extract_module_docstring(
+                "#!/usr/bin/env python3\n# coding: utf-8\n\n\"\"\"Hello\nworld\"\"\"\nvalue = 1\n"
+            ),
+            Some("Hello world".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_non_leading_python_docstring() {
+        assert_eq!(
+            extract_module_docstring("import os\n\"\"\"Not a module docstring\"\"\"\n"),
+            None
+        );
     }
 }
