@@ -3,36 +3,82 @@
 use std::fs;
 use std::path::Path;
 
+type DocExtractor = fn(&str) -> Option<String>;
+type DocFormatter = fn(&str) -> String;
+
+struct LanguageDocSupport {
+    extensions: &'static [&'static str],
+    directory_doc_entry_files: Option<&'static [&'static str]>,
+    extract_file_doc: DocExtractor,
+    format: DocFormatter,
+}
+
+const LANGUAGE_DOCS: &[LanguageDocSupport] = &[
+    LanguageDocSupport {
+        extensions: &["ts", "tsx"],
+        directory_doc_entry_files: Some(&["index.ts", "index.tsx"]),
+        extract_file_doc: extract_leading_tsdoc,
+        format: format_tsdoc,
+    },
+    LanguageDocSupport {
+        extensions: &["py"],
+        directory_doc_entry_files: Some(&["__init__.py"]),
+        extract_file_doc: extract_module_docstring,
+        format: format_python_docstring,
+    },
+    LanguageDocSupport {
+        extensions: &["rs"],
+        directory_doc_entry_files: Some(&["mod.rs"]),
+        extract_file_doc: extract_rust_module_doc,
+        format: format_rust_module_doc,
+    },
+];
+
 pub fn format_doc_comment_for_path(path: &Path) -> Option<String> {
     if path.is_dir() {
-        return ["index.ts", "index.tsx", "__init__.py", "mod.rs"]
-            .iter()
-            .map(|name| path.join(name))
-            .find_map(|index_path| format_doc_comment_for_file(&index_path));
+        return format_doc_comment_for_directory(path);
     }
 
     format_doc_comment_for_file(path)
 }
 
+fn format_doc_comment_for_directory(path: &Path) -> Option<String> {
+    LANGUAGE_DOCS
+        .iter()
+        .find_map(|language| {
+            language
+                .directory_doc_entry_files?
+                .iter()
+                .map(|name| path.join(name))
+                .find_map(|entry_path| format_doc_comment_for_file(&entry_path))
+        })
+}
+
 fn format_doc_comment_for_file(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?;
     let contents = fs::read_to_string(path).ok()?;
+    let language = find_language_doc_support(ext)?;
+    let doc = (language.extract_file_doc)(&contents)?;
 
-    match ext {
-        "ts" | "tsx" => {
-            let doc = extract_leading_tsdoc(&contents)?;
-            Some(format!(" /** {doc} */"))
-        }
-        "py" => {
-            let doc = extract_module_docstring(&contents)?;
-            Some(format!(" \"\"\" {doc} \"\"\""))
-        }
-        "rs" => {
-            let doc = extract_rust_module_doc(&contents)?;
-            Some(format!(" //! {doc}"))
-        }
-        _ => None,
-    }
+    Some((language.format)(&doc))
+}
+
+fn find_language_doc_support(ext: &str) -> Option<&'static LanguageDocSupport> {
+    LANGUAGE_DOCS
+        .iter()
+        .find(|language| language.extensions.contains(&ext))
+}
+
+fn format_tsdoc(doc: &str) -> String {
+    format!(" /** {doc} */")
+}
+
+fn format_python_docstring(doc: &str) -> String {
+    format!(" \"\"\" {doc} \"\"\"")
+}
+
+fn format_rust_module_doc(doc: &str) -> String {
+    format!(" //! {doc}")
 }
 
 fn extract_leading_tsdoc(contents: &str) -> Option<String> {
