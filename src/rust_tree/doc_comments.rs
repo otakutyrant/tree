@@ -3,8 +3,15 @@
 use std::fs;
 use std::path::Path;
 
-type DocExtractor = fn(&str) -> Option<String>;
-type DocFormatter = fn(&str) -> String;
+type DocExtractor = fn(&str) -> Option<Vec<String>>;
+type DocFormatter = fn(&[String]) -> Vec<String>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FormattedDocComment {
+    // Keep formatted logical lines so traversal can render single-line docs inline
+    // and multi-line docs on continuation rows under the owning tree node.
+    pub lines: Vec<String>,
+}
 
 struct LanguageDocSupport {
     extensions: &'static [&'static str],
@@ -34,7 +41,7 @@ const LANGUAGE_DOCS: &[LanguageDocSupport] = &[
     },
 ];
 
-pub fn format_doc_comment_for_path(path: &Path) -> Option<String> {
+pub fn format_doc_comment_for_path(path: &Path) -> Option<FormattedDocComment> {
     if path.is_dir() {
         return format_doc_comment_for_directory(path);
     }
@@ -42,25 +49,42 @@ pub fn format_doc_comment_for_path(path: &Path) -> Option<String> {
     format_doc_comment_for_file(path)
 }
 
-fn format_doc_comment_for_directory(path: &Path) -> Option<String> {
+pub fn format_doc_comments_for_directory(path: &Path) -> Vec<(String, FormattedDocComment)> {
     LANGUAGE_DOCS
         .iter()
-        .find_map(|language| {
-            language
-                .directory_doc_entry_files?
-                .iter()
-                .map(|name| path.join(name))
-                .find_map(|entry_path| format_doc_comment_for_file(&entry_path))
+        .flat_map(|language| language.directory_doc_entry_files.into_iter().flatten())
+        .filter_map(|name| {
+            let entry_path = path.join(name);
+            let comment = format_doc_comment_for_file(&entry_path)?;
+            Some((name.to_string(), comment))
         })
+        .collect()
 }
 
-fn format_doc_comment_for_file(path: &Path) -> Option<String> {
+pub fn is_directory_doc_entry_file_name(file_name: &str) -> bool {
+    LANGUAGE_DOCS.iter().any(|language| {
+        language
+            .directory_doc_entry_files
+            .is_some_and(|entry_files| entry_files.contains(&file_name))
+    })
+}
+
+fn format_doc_comment_for_directory(path: &Path) -> Option<FormattedDocComment> {
+    format_doc_comments_for_directory(path)
+        .into_iter()
+        .map(|(_, comment)| comment)
+        .next()
+}
+
+fn format_doc_comment_for_file(path: &Path) -> Option<FormattedDocComment> {
     let ext = path.extension()?.to_str()?;
     let contents = fs::read_to_string(path).ok()?;
     let language = find_language_doc_support(ext)?;
-    let doc = (language.extract_file_doc)(&contents)?;
+    let doc_lines = (language.extract_file_doc)(&contents)?;
 
-    Some((language.format)(&doc))
+    Some(FormattedDocComment {
+        lines: (language.format)(&doc_lines),
+    })
 }
 
 fn find_language_doc_support(ext: &str) -> Option<&'static LanguageDocSupport> {
@@ -69,19 +93,41 @@ fn find_language_doc_support(ext: &str) -> Option<&'static LanguageDocSupport> {
         .find(|language| language.extensions.contains(&ext))
 }
 
-fn format_tsdoc(doc: &str) -> String {
-    format!(" /** {doc} */")
+fn format_tsdoc(doc_lines: &[String]) -> Vec<String> {
+    match doc_lines {
+        [] => Vec::new(),
+        [line] => vec![format!("/** {line} */")],
+        _ => {
+            // Preserve multi-line structure instead of collapsing to one line so
+            // the renderer can place longer docs beneath the node.
+            let mut formatted = Vec::with_capacity(doc_lines.len() + 1);
+            formatted.push(format!("/** {}", doc_lines[0]));
+            formatted.extend(doc_lines[1..].iter().map(|line| format!(" * {line}")));
+            formatted.push(" */".to_string());
+            formatted
+        }
+    }
 }
 
-fn format_python_docstring(doc: &str) -> String {
-    format!(" \"\"\" {doc} \"\"\"")
+fn format_python_docstring(doc_lines: &[String]) -> Vec<String> {
+    match doc_lines {
+        [] => Vec::new(),
+        [line] => vec![format!("\"\"\" {line} \"\"\"")],
+        _ => {
+            let mut formatted = Vec::with_capacity(doc_lines.len() + 2);
+            formatted.push(format!("\"\"\" {}", doc_lines[0]));
+            formatted.extend(doc_lines[1..].iter().cloned());
+            formatted.push("\"\"\"".to_string());
+            formatted
+        }
+    }
 }
 
-fn format_rust_module_doc(doc: &str) -> String {
-    format!(" //! {doc}")
+fn format_rust_module_doc(doc_lines: &[String]) -> Vec<String> {
+    doc_lines.iter().map(|line| format!("//! {line}")).collect()
 }
 
-fn extract_leading_tsdoc(contents: &str) -> Option<String> {
+fn extract_leading_tsdoc(contents: &str) -> Option<Vec<String>> {
     let contents = contents.strip_prefix('\u{feff}').unwrap_or(contents);
     let contents = strip_shebang(contents);
 
@@ -105,27 +151,27 @@ fn strip_shebang(contents: &str) -> &str {
     contents
 }
 
-fn normalize_tsdoc_block(block: &str) -> Option<String> {
+fn normalize_tsdoc_block(block: &str) -> Option<Vec<String>> {
     let inner = block
         .strip_prefix("/**")?
         .strip_suffix("*/")?
         .trim_matches(|c: char| c == '\r' || c == '\n');
 
-    let parts: Vec<&str> = inner
+    let parts: Vec<String> = inner
         .lines()
         .map(|line| line.trim())
-        .map(|line| line.strip_prefix('*').unwrap_or(line).trim())
+        .map(|line| line.strip_prefix('*').unwrap_or(line).trim().to_string())
         .filter(|line| !line.is_empty())
         .collect();
 
     if parts.is_empty() {
         None
     } else {
-        Some(parts.join(" "))
+        Some(parts)
     }
 }
 
-fn extract_module_docstring(contents: &str) -> Option<String> {
+fn extract_module_docstring(contents: &str) -> Option<Vec<String>> {
     let contents = contents.strip_prefix('\u{feff}').unwrap_or(contents);
     let contents = strip_shebang(contents);
     let contents = skip_python_leading_trivia(contents);
@@ -206,22 +252,22 @@ fn parse_python_string_literal(contents: &str) -> Option<(&str, &str)> {
     }
 }
 
-fn normalize_python_docstring(literal: &str) -> Option<String> {
-    let parts: Vec<&str> = literal
+fn normalize_python_docstring(literal: &str) -> Option<Vec<String>> {
+    let parts: Vec<String> = literal
         .trim_matches(|c: char| c == '\r' || c == '\n')
         .lines()
-        .map(|line| line.trim())
+        .map(|line| line.trim().to_string())
         .filter(|line| !line.is_empty())
         .collect();
 
     if parts.is_empty() {
         None
     } else {
-        Some(parts.join(" "))
+        Some(parts)
     }
 }
 
-fn extract_rust_module_doc(contents: &str) -> Option<String> {
+fn extract_rust_module_doc(contents: &str) -> Option<Vec<String>> {
     let contents = contents.strip_prefix('\u{feff}').unwrap_or(contents);
     let contents = strip_shebang(contents);
     let contents = contents.trim_start_matches([' ', '\t', '\r', '\n']);
@@ -237,7 +283,7 @@ fn extract_rust_module_doc(contents: &str) -> Option<String> {
     None
 }
 
-fn normalize_rust_line_docs(contents: &str) -> Option<String> {
+fn normalize_rust_line_docs(contents: &str) -> Option<Vec<String>> {
     let mut parts = Vec::new();
 
     for line in contents.lines() {
@@ -245,7 +291,7 @@ fn normalize_rust_line_docs(contents: &str) -> Option<String> {
         if let Some(doc_line) = trimmed.strip_prefix("//!") {
             let doc_line = doc_line.trim();
             if !doc_line.is_empty() {
-                parts.push(doc_line);
+                parts.push(doc_line.to_string());
             }
             continue;
         }
@@ -261,11 +307,11 @@ fn normalize_rust_line_docs(contents: &str) -> Option<String> {
     if parts.is_empty() {
         None
     } else {
-        Some(parts.join(" "))
+        Some(parts)
     }
 }
 
-fn normalize_rust_block_doc(contents: &str) -> Option<String> {
+fn normalize_rust_block_doc(contents: &str) -> Option<Vec<String>> {
     let end = contents.find("*/")?;
     let block = &contents[..end + 2];
     let inner = block
@@ -273,17 +319,17 @@ fn normalize_rust_block_doc(contents: &str) -> Option<String> {
         .strip_suffix("*/")?
         .trim_matches(|c: char| c == '\r' || c == '\n');
 
-    let parts: Vec<&str> = inner
+    let parts: Vec<String> = inner
         .lines()
         .map(|line| line.trim())
-        .map(|line| line.strip_prefix('*').unwrap_or(line).trim())
+        .map(|line| line.strip_prefix('*').unwrap_or(line).trim().to_string())
         .filter(|line| !line.is_empty())
         .collect();
 
     if parts.is_empty() {
         None
     } else {
-        Some(parts.join(" "))
+        Some(parts)
     }
 }
 
@@ -297,7 +343,7 @@ mod tests {
     fn extracts_single_line_tsdoc() {
         assert_eq!(
             extract_leading_tsdoc("/** Hello world */\nexport const x = 1;"),
-            Some("Hello world".to_string())
+            Some(vec!["Hello world".to_string()])
         );
     }
 
@@ -305,7 +351,7 @@ mod tests {
     fn extracts_multiline_tsdoc() {
         assert_eq!(
             extract_leading_tsdoc("/**\n * Hello\n * world\n */\nexport const x = 1;"),
-            Some("Hello world".to_string())
+            Some(vec!["Hello".to_string(), "world".to_string()])
         );
     }
 
@@ -313,7 +359,7 @@ mod tests {
     fn allows_bom_and_shebang_before_tsdoc() {
         assert_eq!(
             extract_leading_tsdoc("\u{feff}#!/usr/bin/env node\n/** Hi */\nconsole.log('x');"),
-            Some("Hi".to_string())
+            Some(vec!["Hi".to_string()])
         );
     }
 
@@ -338,7 +384,7 @@ mod tests {
     fn extracts_python_module_docstring() {
         assert_eq!(
             extract_module_docstring("\"\"\"Hello world\"\"\"\nvalue = 1\n"),
-            Some("Hello world".to_string())
+            Some(vec!["Hello world".to_string()])
         );
     }
 
@@ -348,7 +394,7 @@ mod tests {
             extract_module_docstring(
                 "#!/usr/bin/env python3\n# coding: utf-8\n\n\"\"\"Hello\nworld\"\"\"\nvalue = 1\n"
             ),
-            Some("Hello world".to_string())
+            Some(vec!["Hello".to_string(), "world".to_string()])
         );
     }
 
@@ -366,7 +412,10 @@ mod tests {
             extract_rust_module_doc(
                 "//! Core tree traversal.\n//! Renders output.\n\npub fn run() {}\n"
             ),
-            Some("Core tree traversal. Renders output.".to_string())
+            Some(vec![
+                "Core tree traversal.".to_string(),
+                "Renders output.".to_string(),
+            ])
         );
     }
 
@@ -376,7 +425,10 @@ mod tests {
             extract_rust_module_doc(
                 "/*!\n * Core tree traversal.\n * Renders output.\n */\npub fn run() {}\n"
             ),
-            Some("Core tree traversal. Renders output.".to_string())
+            Some(vec![
+                "Core tree traversal.".to_string(),
+                "Renders output.".to_string(),
+            ])
         );
     }
 

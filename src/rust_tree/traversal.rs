@@ -12,7 +12,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::os::unix::fs::PermissionsExt;
 
 use crate::rust_tree::display::{colorize, colorize_doc_comment};
-use crate::rust_tree::doc_comments::format_doc_comment_for_path;
+use crate::rust_tree::doc_comments::{
+    format_doc_comment_for_path, format_doc_comments_for_directory, FormattedDocComment,
+    is_directory_doc_entry_file_name,
+};
 use crate::rust_tree::icons::IconManager;
 // Conditionally import the permissions formatter only on Unix
 #[cfg(unix)]
@@ -146,6 +149,7 @@ fn format_entry_line(
     indent_state: &[bool],
     is_last: bool,
     icon_manager: &IconManager,
+    doc_comment: Option<FormattedDocComment>,
 ) -> std::io::Result<String> {
     let path = entry.path();
     let mut line = String::new();
@@ -213,16 +217,6 @@ fn format_entry_line(
     };
     line.push_str(&colored_name);
 
-    if options.doc {
-        if let Some(doc_comment) = format_doc_comment_for_path(&path) {
-            if options.no_color || !options.color {
-                line.push_str(&doc_comment);
-            } else {
-                line.push_str(&colorize_doc_comment(&doc_comment));
-            }
-        }
-    }
-
     // --- Append indicator if -F/--classify is enabled ---
     if options.classify {
         let indicator = if file_type.is_dir() {
@@ -278,7 +272,174 @@ fn format_entry_line(
         }
     }
 
+    if options.doc {
+        append_doc_comment(&mut line, doc_comment, options, indent_state, is_last);
+    }
+
     Ok(line)
+}
+
+fn append_doc_comment(
+    line: &mut String,
+    doc_comment: Option<FormattedDocComment>,
+    options: &TreeOptions,
+    indent_state: &[bool],
+    is_last: bool,
+) {
+    let Some(doc_comment) = doc_comment else {
+        return;
+    };
+
+    let use_color = !options.no_color && options.color;
+    // Single-line docs stay inline. Multi-line docs are emitted on
+    // continuation rows so the tree structure remains readable.
+    if doc_comment.lines.len() == 1 {
+        line.push(' ');
+        if use_color {
+            line.push_str(&colorize_doc_comment(&doc_comment.lines[0]));
+        } else {
+            line.push_str(&doc_comment.lines[0]);
+        }
+    } else {
+        let continuation_prefix = build_doc_continuation_prefix(options, indent_state, is_last);
+        for doc_line in doc_comment.lines {
+            line.push('\n');
+            line.push_str(&continuation_prefix);
+            if doc_line.is_empty() {
+                continue;
+            }
+            if use_color {
+                line.push_str(&colorize_doc_comment(&doc_line));
+            } else {
+                line.push_str(&doc_line);
+            }
+        }
+    }
+}
+
+fn build_doc_continuation_prefix(
+    options: &TreeOptions,
+    indent_state: &[bool],
+    is_last: bool,
+) -> String {
+    if options.no_indent {
+        return String::new();
+    }
+
+    let mut prefix = String::new();
+    for &is_parent_last in indent_state {
+        if is_parent_last {
+            prefix.push_str("    ");
+        } else if options.ascii {
+            prefix.push_str("|   ");
+        } else {
+            prefix.push_str("│   ");
+        }
+    }
+
+    if is_last {
+        prefix.push_str("    ");
+    } else if options.ascii {
+        prefix.push_str("|   ");
+    } else {
+        prefix.push_str("│   ");
+    }
+
+    prefix
+}
+
+fn resolve_directory_doc_comment(
+    path: &Path,
+    root_path: &Path,
+    options: &TreeOptions,
+    depth: usize,
+    child_parent_matched: bool,
+    gitignore_rules: &GitignoreRules,
+) -> std::io::Result<Option<FormattedDocComment>> {
+    if !options.doc {
+        return Ok(None);
+    }
+
+    let directory_doc_comments = format_doc_comments_for_directory(path);
+    if directory_doc_comments.is_empty() {
+        return Ok(None);
+    }
+
+    if should_skip_dir_recursion(path, depth, options) {
+        return Ok(Some(combine_directory_doc_comments(&directory_doc_comments)));
+    }
+
+    let child_rules;
+    let child_rules_ref = if options.gitignore {
+        match gitignore_rules.extend_with_dir(path, root_path) {
+            Some(rules) => {
+                child_rules = rules;
+                &child_rules
+            }
+            None => gitignore_rules,
+        }
+    } else {
+        gitignore_rules
+    };
+
+    let reader = match fs::read_dir(path) {
+        Ok(reader) => reader,
+        Err(_) => return Ok(Some(combine_directory_doc_comments(&directory_doc_comments))),
+    };
+
+    let mut visible_directory_doc_entry_files = 0usize;
+    for child in reader.filter_map(Result::ok) {
+        let child_name = child.file_name();
+        let child_name = match child_name.to_str() {
+            Some(name) => name,
+            None => continue,
+        };
+
+        if !is_directory_doc_entry_file_name(child_name) {
+            continue;
+        }
+
+        if should_skip_entry(
+            &child,
+            options,
+            child_parent_matched,
+            child_rules_ref,
+            root_path,
+        )? {
+            continue;
+        }
+
+        if directory_doc_comments
+            .iter()
+            .any(|(entry_file_name, _)| entry_file_name == child_name)
+        {
+            visible_directory_doc_entry_files += 1;
+        }
+    }
+
+    // If every doc-bearing entry file is visible, let those file nodes own the
+    // docs. If any are hidden, render the full combined block on the directory
+    // so visible and hidden language docs stay together.
+    if visible_directory_doc_entry_files == directory_doc_comments.len() {
+        Ok(None)
+    } else {
+        Ok(Some(combine_directory_doc_comments(&directory_doc_comments)))
+    }
+}
+
+fn combine_directory_doc_comments(
+    directory_doc_comments: &[(String, FormattedDocComment)],
+) -> FormattedDocComment {
+    let mut lines = Vec::new();
+
+    for (index, (_, comment)) in directory_doc_comments.iter().enumerate() {
+        if index > 0 {
+            lines.push(String::new());
+        }
+        lines.extend(comment.lines.iter().cloned());
+    }
+
+    FormattedDocComment { lines }
 }
 
 fn has_pattern_filter(options: &TreeOptions) -> bool {
@@ -504,8 +665,23 @@ pub fn traverse_directory<P: AsRef<Path>, W: Write>(
         if entry.file_type()?.is_dir() {
             let skip_recursion = should_skip_dir_recursion(&path, depth, options);
             let child_parent_matched = dir_matches_pattern(&path, options);
+            let directory_doc_comment = resolve_directory_doc_comment(
+                &path,
+                root_path.as_ref(),
+                options,
+                depth,
+                child_parent_matched,
+                gitignore_rules,
+            )?;
 
-            let line = format_entry_line(&entry, options, indent_state, is_last, icon_manager)?;
+            let line = format_entry_line(
+                &entry,
+                options,
+                indent_state,
+                is_last,
+                icon_manager,
+                directory_doc_comment,
+            )?;
             writeln!(writer, "{line}")?;
             stats.0 += 1;
             found_content = true;
@@ -539,7 +715,14 @@ pub fn traverse_directory<P: AsRef<Path>, W: Write>(
                 )?;
             }
         } else {
-            let line = format_entry_line(&entry, options, indent_state, is_last, icon_manager)?;
+            let line = format_entry_line(
+                &entry,
+                options,
+                indent_state,
+                is_last,
+                icon_manager,
+                format_doc_comment_for_path(&path),
+            )?;
             writeln!(writer, "{line}")?;
             stats.1 += 1;
             found_content = true;
