@@ -129,7 +129,7 @@ For example:
 `--doc` currently supports:
 
 | Language | Files | Parsed documentation | Directory docs are inferred from these entry files inside |
-| --- | --- | --- |
+| --- | --- | --- | --- |
 | TypeScript | `*.ts`, `*.tsx` | The first leading TSDoc block (`/** ... */`) | `index.ts`, `index.tsx` |
 | Python | `*.py` | The module docstring | `__init__.py` |
 | Rust | `*.rs` | The first leading inner doc (`//! ...` or `/*! ... */`) | `mod.rs` |
@@ -141,10 +141,17 @@ $ ./target/release/tree --doc -L 2 --noreport src
 src
 ├── lib.rs //! Public library entry points for the `tree` crate.
 ├── main.rs //! Command-line binary entry point for `tree`.
-└── rust_tree //! Core modules for traversal, rendering, and CLI behavior.
+└── rust_tree
     ├── cli.rs //! Command-line parsing and top-level CLI execution.
+    ├── display.rs
     ├── doc_comments.rs //! Extraction of leading documentation comments for supported languages.
-    └── traversal.rs //! Filesystem and virtual tree traversal plus output rendering.
+    ├── fromfile.rs
+    ├── gitignore.rs
+    ├── icons.rs
+    ├── mod.rs //! Core modules for traversal, rendering, and CLI behavior.
+    ├── options.rs
+    ├── traversal.rs //! Filesystem and virtual tree traversal plus output rendering.
+    └── utils.rs
 ```
 
 ### Using as Rust Crate
